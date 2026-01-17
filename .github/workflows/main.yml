@@ -1,0 +1,100 @@
+# app.py - Il cuore di HostMaster 2026
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import io
+
+st.set_page_config(page_title="HostMaster 2026 - Check-in Online", layout="wide")
+
+# --- DATABASE SIMULATO (Useremo un file CSV come DB temporaneo) ---
+DB_FILE = 'ospiti_log.csv'
+
+def carica_ospiti():
+    try:
+        return pd.read_csv(DB_FILE)
+    except FileNotFoundError:
+        return pd.DataFrame(columns=['Nome', 'Cognome', 'Arrivo', 'Notti', 'Tipo Alloggiato', 'Status Invio', 'Tassa'])
+
+def salva_ospite(dati_ospite):
+    df = carica_ospiti()
+    nuovo_ospite_df = pd.DataFrame([dati_ospite])
+    df = pd.concat([df, nuovo_ospite_df], ignore_index=True)
+    df.to_csv(DB_FILE, index=False)
+
+# --- FUNZIONE GENERAZIONE FILE QUESTURA (IL FORMATO MAGICO) ---
+def genera_file_questura_txt(df_ospiti):
+    output = ""
+    # Inserisci qui i tuoi dati fissi della struttura, che riceverai dalla Questura
+    codice_struttura = "TUA_COD_STRUTTURA" 
+    
+    for index, ospite in df_ospiti.iterrows():
+        # Esempio Semplificato di Tracciato Record (la lunghezza dei campi è cruciale)
+        riga = ""
+        riga += "01".ljust(2) # Tipo alloggiato: 01=Capofamiglia (semplificato)
+        riga += pd.to_datetime(ospite['Arrivo']).strftime('%d%m%Y') # Data Arrivo GGMMYYYY
+        riga += str(ospite['Notti']).zfill(2)
+        riga += str(ospite['Cognome']).ljust(50)[:50].upper()
+        riga += str(ospite['Nome']).ljust(30)[:30].upper()
+        # Aggiungere qui tutti gli altri campi obbligatori (sesso, data nascita, nazionalità...)
+        output += riga + "\n"
+    
+    return output
+
+# --- INTERFACCIA UTENTE (Streamlit) ---
+
+st.title("🏨 HostMaster 2026 - Gestione Appartamento")
+st.markdown(f"**CIN:** *In attesa di ricezione dal Ministero del Turismo*")
+
+menu = ["Registra Nuovo Check-in", "Gestione Burocratica & Export"]
+choice = st.sidebar.selectbox("Menu Principale", menu)
+
+if choice == "Registra Nuovo Check-in":
+    st.subheader("Inserimento Dati Ospite")
+
+    with st.form("checkin_form"):
+        col1, col2 = st.columns(2)
+        with col1:
+            nome = st.text_input("Nome", required=True)
+            cognome = st.text_input("Cognome", required=True)
+            data_arrivo = st.date_input("Data Arrivo", datetime.now(), required=True)
+        with col2:
+            notti = st.number_input("N. Notti", min_value=1, step=1)
+            tassa_soggiorno = st.number_input("Tassa di Soggiorno (€)", value=2.00, step=0.10) # Modifica la tariffa qui
+        
+        submitted = st.form_submit_button("Salva Ospite")
+        if submitted:
+            dati_ospite = {
+                'Nome': nome,
+                'Cognome': cognome,
+                'Arrivo': data_arrivo,
+                'Notti': notti,
+                'Tassa': notti * tassa_soggiorno,
+                'Tipo Alloggiato': 'Capofamiglia',
+                'Status Invio': 'Da Inviare'
+            }
+            salva_ospite(dati_ospite)
+            st.success(f"Ospite {nome} {cognome} salvato! Tassa calcolata: €{dati_ospite['Tassa']:.2f}")
+
+elif choice == "Gestione Burocratica & Export":
+    st.subheader("Invio Dati a Questura e Comune")
+    df_current = carica_ospiti()
+    st.dataframe(df_current)
+
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        st.markdown("**1. Comunicazione Questura (Alloggiati Web)**")
+        txt_output = genera_file_questura_txt(df_current)
+        st.download_button(
+            label="Scarica File .TXT per Questura",
+            data=txt_output,
+            file_name=f"alloggiati_{datetime.now().strftime('%Y%m%d')}.txt",
+            mime="text/plain"
+        )
+        st.caption("Carica questo file sul portale Alloggiati Web. Ricorda di aggiornare i dati nel codice con le tue credenziali e il tracciato completo.")
+
+    with col_b2:
+        st.markdown("**2. Calcolo Tassa di Soggiorno (Comune)**")
+        totale_tasse = df_current['Tassa'].sum()
+        st.info(f"Totale Tasse da versare al Comune: €{totale_tasse:.2f}")
+        st.caption(f"Da versare entro le scadenze del Comune di Gela CL (presumo la tua location).")
+
